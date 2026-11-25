@@ -47,8 +47,13 @@ window. The item is not shown for yourself or for players already listed.
 `/blacklist window` shows one row per entry: name, BattleTag (`-` if unknown),
 date added and reason. Click into a reason to edit it; it is saved when you press
 Enter or click away (Escape discards the edit). **Remove** asks for a second
-click ("Sure?") before deleting. Scroll with the mouse wheel or the `<` `>`
-buttons; drag to move; Escape closes it.
+click ("Sure?") before deleting. Scroll with the mouse wheel or the up/down
+arrow buttons; drag to move; the title-bar X or Escape closes it.
+
+The window uses the game's stock templates (`BasicFrameTemplateWithInset`,
+`UIPanelButtonTemplate`, `InputBoxTemplate`, `UIPanelScrollUp/DownButtonTemplate`,
+`UIPanelCloseButton`). Each is created through `pcall`, so one missing in Forever
+falls back to a plainer look instead of an error.
 
 ### Warnings
 
@@ -87,8 +92,8 @@ Run `/reload` first and watch for Lua errors (`/console scriptErrors 1`).
    which menus you opened.
 3. **Window:** `/blacklist window`. Edit a reason, press Enter, `/blacklist list`
    (reason changed). Click away instead of Enter (also saved). Press Remove twice
-   (entry gone). Close with Escape. With over 10 entries, check `<` `>` and the
-   mouse wheel.
+   (entry gone). Close with Escape. With over 10 entries, check the arrow
+   buttons and the mouse wheel; the window should look like a default panel.
 4. **Applicant warning:** blacklist a friend, list your group in the group
    finder, and have that friend apply. Expect one warning. Declining and re-applying warns
    again. If nothing happens, run

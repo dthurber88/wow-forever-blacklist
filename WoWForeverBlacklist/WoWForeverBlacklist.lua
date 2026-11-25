@@ -341,9 +341,16 @@ local function SetupMenu()
 end
 
 -- Window ---------------------------------------------------------------------
--- Plain frame built from textures and font strings only (no Blizzard frame
--- templates besides an optional button skin), since Forever's template set
--- is not documented.
+-- Built from the game's stock templates (BasicFrameTemplateWithInset,
+-- UIPanelButtonTemplate, InputBoxTemplate, UIPanelScroll*ButtonTemplate), each
+-- created through pcall so a template missing in Forever falls back to a plainer
+-- look instead of erroring. See README for the sources and confidence.
+
+-- CreateFrame with a template, or nil if the template does not exist.
+local function TryTemplate(kind, parent, template)
+    local ok, f = pcall(CreateFrame, kind, nil, parent, template)
+    if ok and f then return f end
+end
 
 local ROWS, ROW_H = 10, 24
 local window, offset = nil, 0
@@ -377,7 +384,7 @@ end
 local function MakeRow(parent, i)
     local row = CreateFrame("Frame", nil, parent)
     row:SetSize(616, ROW_H)
-    row:SetPoint("TOPLEFT", 12, -48 - (i - 1) * ROW_H)
+    row:SetPoint("TOPLEFT", 14, -48 - (i - 1) * ROW_H)
 
     row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     row.name:SetPoint("LEFT", 0, 0)
@@ -394,15 +401,21 @@ local function MakeRow(parent, i)
     row.date:SetWidth(72)
     row.date:SetJustifyH("LEFT")
 
-    local box = CreateFrame("EditBox", nil, row)
-    box:SetPoint("LEFT", 334, 0)
-    box:SetSize(210, ROW_H - 4)
+    local box = TryTemplate("EditBox", row, "InputBoxTemplate")
+    if box then
+        box:SetPoint("LEFT", 338, 0)
+        box:SetSize(204, ROW_H - 4)
+    else
+        box = CreateFrame("EditBox", nil, row)
+        box:SetPoint("LEFT", 334, 0)
+        box:SetSize(210, ROW_H - 4)
+        box:SetFontObject(ChatFontNormal)
+        local bg = box:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(1, 1, 1, 0.08)
+    end
     box:SetAutoFocus(false)
-    box:SetFontObject(ChatFontNormal)
     box:SetTextInsets(4, 4, 0, 0)
-    local bg = box:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(1, 1, 1, 0.08)
     box:SetScript("OnTextChanged", function(self, userInput)
         if userInput then self.edited = true end
     end)
@@ -470,8 +483,51 @@ local function Scroll(delta)
     RefreshWindow()
 end
 
+-- Standard-looking frame: BasicFrameTemplateWithInset (title bar, close button,
+-- inset panel), else BasicFrameTemplate, else a plain tooltip-style backdrop.
+local function MakeFrame()
+    for _, template in ipairs({ "BasicFrameTemplateWithInset", "BasicFrameTemplate" }) do
+        local ok, f = pcall(CreateFrame, "Frame", "WoWForeverBlacklistFrame", UIParent, template)
+        if ok and f then return f, true end
+    end
+    local ok, f = pcall(CreateFrame, "Frame", "WoWForeverBlacklistFrame", UIParent, "BackdropTemplate")
+    if not ok or not f then f = CreateFrame("Frame", "WoWForeverBlacklistFrame", UIParent) end
+    if f.SetBackdrop then
+        f:SetBackdrop({
+            bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+            tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 11, right = 12, top = 12, bottom = 11 },
+        })
+    else
+        local bg = f:CreateTexture(nil, "BACKGROUND")
+        bg:SetAllPoints()
+        bg:SetColorTexture(0, 0, 0, 0.88)
+    end
+    return f, false
+end
+
+local function SetWindowTitle(f, text)
+    local t = f.TitleText or (f.TitleContainer and f.TitleContainer.TitleText)
+    if not t then
+        t = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        t:SetPoint("TOP", 0, -6)
+    end
+    t:SetText(text)
+end
+
+-- Paging arrow: the stock scroll up/down button, else a plain "<" / ">" button.
+local function MakePageButton(parent, template, label, onClick)
+    local b = TryTemplate("Button", parent, template)
+    if b then
+        b:SetScript("OnClick", onClick)
+        return b
+    end
+    return MakeButton(parent, label, 28, 22, onClick)
+end
+
 local function CreateWindow()
-    local f = CreateFrame("Frame", "WoWForeverBlacklistFrame", UIParent)
+    local f, templated = MakeFrame()
     f:SetSize(640, 340)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
@@ -491,17 +547,11 @@ local function CreateWindow()
     end)
     f:Hide()
 
-    local bg = f:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetColorTexture(0, 0, 0, 0.88)
+    SetWindowTitle(f, "Blacklist")
 
-    local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 12, -12)
-    title:SetText("Blacklist")
-
-    for _, h in ipairs({ { "Name", 12 }, { "BattleTag", 146 }, { "Added", 270 }, { "Reason", 346 } }) do
+    for _, h in ipairs({ { "Name", 14 }, { "BattleTag", 146 }, { "Added", 270 }, { "Reason", 346 } }) do
         local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        fs:SetPoint("TOPLEFT", h[2], -34)
+        fs:SetPoint("TOPLEFT", h[2], -32)
         fs:SetText(h[1])
     end
 
@@ -510,11 +560,20 @@ local function CreateWindow()
     f.empty:SetText("The blacklist is empty.")
 
     f.count = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    f.count:SetPoint("BOTTOM", 0, 18)
+    f.count:SetPoint("BOTTOM", 0, 8)
 
-    MakeButton(f, "<", 28, 22, function() Scroll(-ROWS) end):SetPoint("BOTTOMLEFT", 12, 12)
-    MakeButton(f, ">", 28, 22, function() Scroll(ROWS) end):SetPoint("BOTTOMLEFT", 44, 12)
-    MakeButton(f, "Close", 70, 22, function() f:Hide() end):SetPoint("BOTTOMRIGHT", -12, 12)
+    MakePageButton(f, "UIPanelScrollUpButtonTemplate", "<", function() Scroll(-ROWS) end):SetPoint("BOTTOMLEFT", 12, 4)
+    MakePageButton(f, "UIPanelScrollDownButtonTemplate", ">", function() Scroll(ROWS) end):SetPoint("BOTTOMLEFT", 44, 4)
+    -- The template supplies a title-bar close button; add one only without it.
+    if not (templated and (f.CloseButton or _G["WoWForeverBlacklistFrameCloseButton"])) then
+        local close = TryTemplate("Button", f, "UIPanelCloseButton")
+        if close then
+            close:SetPoint("TOPRIGHT", -2, -2)
+            close:SetScript("OnClick", function() f:Hide() end)
+        else
+            MakeButton(f, "Close", 70, 22, function() f:Hide() end):SetPoint("BOTTOMRIGHT", -12, 12)
+        end
+    end
 
     window = f
     for i = 1, ROWS do rows[i] = MakeRow(f, i) end
