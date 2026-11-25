@@ -2,7 +2,7 @@
 ## Title: WoW Forever Blacklist
 ## Notes: Keep a personal blacklist of players you do not want to group with, and get warned when one joins your group.
 ## Author: dthurber
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: WoWForeverBlacklistDB
 
 WoWForeverBlacklist.lua
