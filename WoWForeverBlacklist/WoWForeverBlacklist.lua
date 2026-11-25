@@ -3,14 +3,13 @@
 -- and is not known about the Forever API each feature relies on.
 --
 -- Player model (WoW: Forever): a player is a first name + last name. There are
--- no realms, and no way to read another player's ruleset. An entry may also carry
--- a BattleTag, but only where the client lets an addon read one (see README).
+-- no realms, and no way to read another player's ruleset.
 
 local ADDON = "WoWForeverBlacklist"
 local PREFIX = "|cffff4040[Blacklist]|r "
 local DB_VERSION = 3
 
-local db            -- saved: db.entries[key] = { first, last, reason, added, battletag? }
+local db            -- saved: db.entries[key] = { first, last, reason, added }
 local warned = {}   -- keys already warned about while still in the group
 
 local function Print(msg)
@@ -43,80 +42,28 @@ local function ParseTarget(input)
 end
 
 local function EntryLine(e)
-    return string.format("%s%s (added %s)%s", FullName(e),
-        e.battletag and (" [" .. e.battletag .. "]") or "", e.added or "?",
+    return string.format("%s (added %s)%s", FullName(e), e.added or "?",
         e.reason and (": " .. e.reason) or "")
 end
 
--- A BattleTag looks like Name#1234. Compared case-insensitively.
-local function ValidBattleTag(s)
-    return type(s) == "string" and s:match("^[^%s#]+#%d+$") ~= nil
-end
-
--- Finds the entry for a player: by first+last name, else by BattleTag if one is
--- given. Returns entry, key (the key is the name key the entry is stored under).
-local function FindEntry(first, last, battletag)
-    if first then
-        local key = MakeKey(first, last)
-        if db.entries[key] then return db.entries[key], key end
-    end
-    if battletag then
-        local want = battletag:lower()
-        for key, e in pairs(db.entries) do
-            if e.battletag and e.battletag:lower() == want then return e, key end
-        end
-    end
+-- Finds the entry for a player by first+last name. Returns entry, key.
+local function FindEntry(first, last)
+    local key = MakeKey(first, last)
+    if db.entries[key] then return db.entries[key], key end
     return nil
-end
-
--- BattleTag of a player GUID, or nil. On retail only Battle.net friends resolve;
--- whether Forever resolves anyone else is unverified, so nil is the normal case.
-local function BattleTagForGUID(guid)
-    if type(guid) ~= "string" or not (C_BattleNet and C_BattleNet.GetAccountInfoByGUID) then
-        return nil
-    end
-    local ok, info = pcall(C_BattleNet.GetAccountInfoByGUID, guid)
-    if ok and type(info) == "table" and ValidBattleTag(info.battleTag) then
-        return info.battleTag
-    end
-    return nil
-end
-
-local function BattleTagForUnit(unit)
-    local ok, guid = pcall(UnitGUID, unit)
-    return ok and BattleTagForGUID(guid) or nil
 end
 
 -- Adds a player. Returns true if added, false if already listed.
-local function AddEntry(first, last, reason, battletag)
+local function AddEntry(first, last, reason)
     local key = MakeKey(first, last)
     local entry = { first = first, last = last, reason = reason,
-        added = date("%Y-%m-%d"), battletag = battletag }
-    if FindEntry(first, last, battletag) then
+        added = date("%Y-%m-%d") }
+    if FindEntry(first, last) then
         Print(FullName(entry) .. " is already on the blacklist.")
         return false
     end
     db.entries[key] = entry
-    Print("Added " .. FullName(entry) .. (battletag and (" [" .. battletag .. "]") or "") .. ".")
-    return true
-end
-
--- /blacklist battletag <First> <Last> <Name#1234|none>
-local function SetBattleTag(input)
-    local first, last, tag = ParseTarget(input)
-    if not first or not tag then return false end
-    local entry = db.entries[MakeKey(first, last)]
-    if not entry then
-        Print(first .. " " .. last .. " is not on the blacklist.")
-    elseif tag:lower() == "none" then
-        entry.battletag = nil
-        Print("Cleared the BattleTag of " .. FullName(entry) .. ".")
-    elseif ValidBattleTag(tag) then
-        entry.battletag = tag
-        Print("Set the BattleTag of " .. FullName(entry) .. " to " .. tag .. ".")
-    else
-        Print("A BattleTag looks like Name#1234 (or use \"none\" to clear it).")
-    end
+    Print("Added " .. FullName(entry) .. ".")
     return true
 end
 
@@ -206,11 +153,7 @@ local function CheckGroup()
         local unit = prefix .. i
         if UnitExists(unit) and not UnitIsUnit(unit, "player") then
             local first, last = UnitFirstLast(unit)
-            local tag = BattleTagForUnit(unit)
-            local entry, key = FindEntry(first, last, tag)
-            if entry and tag and not entry.battletag then
-                entry.battletag = tag -- remember it once the client lets us read it
-            end
+            local entry, key = FindEntry(first, last)
             if entry and not present[key] then
                 present[key] = true
                 if not warned[key] then
@@ -263,9 +206,8 @@ local function CheckApplicants()
         for i = 1, ApplicantMemberCount(id) do
             local okm, name = pcall(C_LFGList.GetApplicantMemberInfo, id, i)
             local first, last = SplitName(okm and name or nil)
-            -- Applicants expose only a character name: no GUID, no BattleTag.
             local entry, key = nil, nil
-            if first then entry, key = FindEntry(first, last, nil) end
+            if first then entry, key = FindEntry(first, last) end
             if entry then
                 local wkey = id .. "|" .. key
                 seen[wkey] = true
@@ -296,33 +238,31 @@ local MENU_TAGS = {
     "MENU_UNIT_COMMUNITIES_MEMBER",
 }
 
--- First, last, battletag (or nil) of the player a menu was opened on, or nil if
+-- First, last of the player a menu was opened on, or nil if
 -- unknown/self/not a player. Prefers the unit token; falls back to a name that
 -- splits by itself.
 local function MenuPlayer(ctx)
     if type(ctx) ~= "table" then return nil end
-    local first, last, tag
+    local first, last
     if ctx.unit and UnitExists(ctx.unit) then
         if UnitIsUnit(ctx.unit, "player") or not UnitIsPlayer(ctx.unit) then return nil end
         first, last = UnitFirstLast(ctx.unit)
-        tag = BattleTagForUnit(ctx.unit)
     elseif type(ctx.name) == "string" then
         first, last = SplitName(ctx.name)
         local mf, ml = UnitFirstLast("player")
         if first and mf and MakeKey(first, last) == MakeKey(mf, ml) then return nil end
-        tag = BattleTagForGUID(ctx.guid)
     end
     if not first then return nil end
-    return Capitalize(first), Capitalize(last), tag
+    return Capitalize(first), Capitalize(last)
 end
 
 local function OnUnitMenu(_, root, ctx)
     if not db or type(root) ~= "table" or not root.CreateButton then return end
-    local first, last, tag = MenuPlayer(ctx)
-    if not first or FindEntry(first, last, tag) then return end
+    local first, last = MenuPlayer(ctx)
+    if not first or FindEntry(first, last) then return end
     if root.CreateDivider then root:CreateDivider() end
     root:CreateButton("Add to blacklist", function()
-        AddEntry(first, last, nil, tag)
+        AddEntry(first, last, nil)
         RefreshWindow()
     end)
 end
@@ -384,18 +324,13 @@ local function MakeRow(parent, i)
     row.name:SetWidth(130)
     row.name:SetJustifyH("LEFT")
 
-    row.tag = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.tag:SetPoint("LEFT", 134, 0)
-    row.tag:SetWidth(120)
-    row.tag:SetJustifyH("LEFT")
-
     row.date = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.date:SetPoint("LEFT", 258, 0)
+    row.date:SetPoint("LEFT", 134, 0)
     row.date:SetWidth(72)
     row.date:SetJustifyH("LEFT")
 
     local box = CreateFrame("EditBox", nil, row)
-    box:SetPoint("LEFT", 334, 0)
+    box:SetPoint("LEFT", 210, 0)
     box:SetSize(210, ROW_H - 4)
     box:SetAutoFocus(false)
     box:SetFontObject(ChatFontNormal)
@@ -428,7 +363,7 @@ local function MakeRow(parent, i)
         Print("Removed " .. FullName(e) .. ".")
         RefreshWindow()
     end)
-    row.remove:SetPoint("LEFT", 550, 0)
+    row.remove:SetPoint("LEFT", 426, 0)
     return row
 end
 
@@ -447,7 +382,6 @@ RefreshWindow = function()
         row.remove:SetText("Remove")
         if e then
             row.name:SetText(FullName(e))
-            row.tag:SetText(e.battletag or "-")
             row.date:SetText(e.added or "?")
             row.reason.edited = false
             row.reason:SetText(e.reason or "")
@@ -499,7 +433,7 @@ local function CreateWindow()
     title:SetPoint("TOPLEFT", 12, -12)
     title:SetText("Blacklist")
 
-    for _, h in ipairs({ { "Name", 12 }, { "BattleTag", 146 }, { "Added", 270 }, { "Reason", 346 } }) do
+    for _, h in ipairs({ { "Name", 12 }, { "Added", 146 }, { "Reason", 222 } }) do
         local fs = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         fs:SetPoint("TOPLEFT", h[2], -34)
         fs:SetText(h[1])
@@ -535,7 +469,6 @@ local function PrintHelp()
     print("  /blacklist add <First> <Last> [reason]")
     print("  /blacklist remove <First> <Last>")
     print("  /blacklist list")
-    print("  /blacklist battletag <First> <Last> <Name#1234|none>")
     print("  /blacklist window")
 end
 
@@ -551,9 +484,6 @@ SlashCmdList["WOWFOREVERBLACKLIST"] = function(msg)
         if not Remove(rest) then PrintHelp() end
     elseif cmd == "list" then
         List()
-    elseif cmd == "battletag" then
-        if not SetBattleTag(rest) then PrintHelp() end
-        RefreshWindow()
     elseif cmd == "window" then
         ToggleWindow()
     else
