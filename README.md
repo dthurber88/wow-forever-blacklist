@@ -16,9 +16,9 @@ no realms. Entries here are `First Last`, compared case-insensitively.
    character select AddOns screen.
 
 The list is stored account-wide in the `WoWForeverBlacklistDB` saved variable.
-Entries saved by v0.2 keep working unchanged: the saved format is the same
-(`version = 3`); the new optional `battletag` field is simply absent on them, so
-no migration is needed. (Data from versions before v0.2 is still discarded.)
+Entries saved by earlier versions keep working unchanged (`version = 3`); a
+leftover `battletag` field on an old entry is ignored. (Data from versions before
+v0.2 is still discarded.)
 
 ## Usage
 
@@ -28,7 +28,6 @@ no migration is needed. (Data from versions before v0.2 is still discarded.)
 | `/blacklist remove <First> <Last>` | Remove a player. |
 | `/blacklist list` | Show all entries with date added and reason. |
 | `/blacklist window` | Open or close the blacklist window (see below). |
-| `/blacklist battletag <First> <Last> <Name#1234>` | Set the BattleTag of an existing entry by hand (`none` clears it). |
 
 `/bl` works as a short alias. Example:
 
@@ -44,8 +43,8 @@ window. The item is not shown for yourself or for players already listed.
 
 ### Window
 
-`/blacklist window` shows one row per entry: name, BattleTag (`-` if unknown),
-date added and reason. Click into a reason to edit it; it is saved when you press
+`/blacklist window` shows one row per entry: name, date added and
+reason. Click into a reason to edit it; it is saved when you press
 Enter or click away (Escape discards the edit). **Remove** asks for a second
 click ("Sure?") before deleting. Scroll with the mouse wheel or the `<` `>`
 buttons; drag to move; Escape closes it.
@@ -63,9 +62,12 @@ All warnings go to your chat frame and include the entry's reason.
 
 ### Matching
 
-Players match on first and last name (case-insensitive) **or** on BattleTag when
-both sides have one. See the BattleTag section below for where a BattleTag can be
-read at all.
+Players match on first and last name only (case-insensitive).
+
+BattleTags are not exposed to addons for players who are not your Battle.net
+friends in this game version (tested live: `C_BattleNet.GetAccountInfoByGUID`
+returned nothing for a target and a groupmate who were not friends), so the addon
+does not use them.
 
 ## Not run in game
 
@@ -97,10 +99,6 @@ Run `/reload` first and watch for Lua errors (`/console scriptErrors 1`).
 5. **Joining a group with listed players:** list two members of a group, join it.
    Expect one message naming both. Leave and rejoin: warned again.
 6. **Someone joins you:** list a player, invite them. Expect one warning.
-7. **BattleTag:** `/dump C_BattleNet.GetAccountInfoByGUID(UnitGUID("party1"))` for a
-   Battle.net friend and for a stranger. A friend should return a table with
-   `battleTag`; if the stranger also does, matching by BattleTag works for more
-   than friends. Add the friend through the menu and check the window shows the tag.
 
 ## What was found about the Forever API, and how sure I am
 
@@ -168,42 +166,6 @@ from community sources, mostly addon authors reporting in-game results, and
   names are always loaded on the first update; the addon re-scans on every
   roster update and names anyone found late, using the same "joined" wording
   for 10 s.
-
-### BattleTag
-
-Asked: can an addon read another player's BattleTag (Blizzard's ignore list uses
-them), and does it identify an account or a character?
-
-- **What it identifies.** A BattleTag (`Name#1234`) identifies a Battle.net
-  **account**; characters are separate (`BNetGameAccountInfo`). Matching on it
-  therefore catches a player's other characters, which name matching cannot.
-  ([BNGetInfo](https://warcraft.wiki.gg/wiki/API:BNGetInfo),
-  [BNetAccountInfo](https://warcraft.wiki.gg/wiki/Struct_BNetAccountInfo).)
-  Confidence: **high** (documented structure; the wiki does not say it in so many words).
-- **Group member.** The only route is
-  `C_BattleNet.GetAccountInfoByGUID(UnitGUID(unit))`, whose `battleTag` field is
-  documented only for **Battle.net friends** ([API page](https://warcraft.wiki.gg/wiki/API:C_BattleNet.GetAccountInfoByGUID)).
-  Retail's own UI treats a non-nil result as "this is a friend". The function
-  exists in the Forever client dump. **Unverified in Forever:** what it returns for
-  non-friends, and whether Battle.net friends are enabled there (Forever's friends
-  window and `C_BattleNet.GetAccountInfoByID` use by another Forever addon suggest
-  yes). Expectation: BattleTag is readable for friends only.
-- **Applicant.** Not readable: `GetApplicantMemberInfo` returns a name and a
-  friend flag but no GUID or tag. Applicants are matched on name only.
-- **Right-click target.** Blizzard resolves the same `GetAccountInfoByGUID` from
-  the menu's unit/GUID; the addon does likewise when the context has a unit (or a
-  `guid` field, an unconfirmed field name). Strangers are expected to return
-  nothing.
-- **Ignore list.** Nothing found says whether Forever's ignore list uses
-  BattleTags. Not established.
-
-What the addon does with that: it stores a `battletag` on an entry when one can be
-read (menu add, or filled in later when a matching group member's tag is readable),
-shows it in `/blacklist list` and the window, and matches a player on name **or**
-BattleTag. Group members are matched by tag where readable; applicants by name
-only. You can set a tag by hand with `/blacklist battletag`. In practice, expect
-tags only for Battle.net friends until the `/dump` in the test checklist shows
-otherwise. Overall confidence that tags are readable beyond friends: **low**.
 
 ## Interface version note
 
